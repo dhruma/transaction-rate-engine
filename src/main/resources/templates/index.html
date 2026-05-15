@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Transaction Rate Engine</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+               margin: 0; background: #f4f6f8; color: #1f2933; }
+        header { background: #003366; color: #fff; padding: 18px 28px; }
+        header h1 { margin: 0; font-size: 20px; }
+        header p { margin: 4px 0 0; font-size: 13px; opacity: .8; }
+        main { max-width: 760px; margin: 28px auto; padding: 0 16px;
+                display: grid; gap: 24px; }
+        .card { background: #fff; border-radius: 10px; padding: 22px 24px;
+                box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+        .card h2 { margin: 0 0 16px; font-size: 16px; }
+        label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+        input, select { width: 100%; padding: 9px 10px; border: 1px solid #cbd2d9;
+                         border-radius: 6px; font-size: 14px; }
+        button { margin-top: 18px; background: #0967d2; color: #fff; border: 0;
+                 padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+        button:hover { background: #0552b5; }
+        .result { margin-top: 16px; font-size: 14px; white-space: pre-wrap;
+                  background: #f0f4f8; border-radius: 6px; padding: 14px; display: none; }
+        .result.show { display: block; }
+        .result.error { background: #fdecea; color: #8a1c1c; }
+        .result table { width: 100%; border-collapse: collapse; }
+        .result td { padding: 4px 6px; }
+        .result td:first-child { color: #52606d; width: 45%; }
+        .hint { font-size: 12px; color: #7b8794; margin-top: 4px; }
+        a { color: #fff; text-decoration: underline; }
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        button.secondary { background: #e4e7eb; color: #1f2933; }
+        button.secondary:hover { background: #cbd2d9; }
+        .tx-table { width: 100%; border-collapse: collapse; margin-top: 14px;
+                    font-size: 13px; }
+        .tx-table th, .tx-table td { text-align: left; padding: 7px 8px;
+                    border-bottom: 1px solid #e4e7eb; }
+        .tx-table th { color: #52606d; font-weight: 600; }
+        .tx-table tbody tr { cursor: pointer; }
+        .tx-table tbody tr:hover { background: #eef4fb; }
+        .tx-table tr.selected { background: #d8e7fb; }
+        .tx-id { font-family: inherit; word-break: break-all; }
+        .empty { color: #7b8794; font-size: 13px; margin-top: 12px; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Transaction Rate Engine</h1>
+    <p>Store a purchase and retrieve it converted into a foreign currency &middot;
+        <a href="/swagger-ui.html">API docs</a></p>
+</header>
+<main>
+    <section class="card">
+        <h2>1. Store a purchase transaction</h2>
+        <label for="description">Description (max 50 characters)</label>
+        <input id="description" maxlength="50" placeholder="Office supplies"/>
+        <label for="date">Transaction date</label>
+        <input id="date" type="date"/>
+        <label for="amount">Purchase amount (USD)</label>
+        <input id="amount" type="number" min="0" step="0.01" placeholder="123.45"/>
+        <div class="btn-row">
+            <button id="storeBtn">Store transaction</button>
+            <button id="clearBtn" class="secondary" type="button">New / Clear form</button>
+        </div>
+        <div id="storeResult" class="result"></div>
+    </section>
+
+    <section class="card">
+        <h2>2. Stored transactions</h2>
+        <div class="hint">5 per page, newest first. Use Prev / Next to page through them.
+            Click a row to select it for conversion below.</div>
+        <div id="txListWrap"></div>
+        <div class="btn-row" style="margin-top:14px">
+            <button id="refreshBtn" class="secondary" type="button">Refresh list</button>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>3. Retrieve converted to a currency</h2>
+        <label for="txId">Transaction id</label>
+        <input id="txId" placeholder="Pick a row above, or paste an id"/>
+        <label for="currency">Target currency</label>
+        <select id="currency"><option value="">Loading currencies…</option></select>
+        <div class="hint">Rate used = newest Treasury rate on/before the purchase date,
+            within the prior 6 months.</div>
+        <button id="retrieveBtn">Retrieve converted</button>
+        <div id="retrieveResult" class="result"></div>
+    </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
