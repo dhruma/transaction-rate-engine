@@ -49,9 +49,14 @@ public class IdempotencyService {
         });
     }
 
-    /** Persists the key→transaction mapping so future replays resolve to the same record. */
+    /**
+     * Claims the key by inserting the key→transaction mapping. {@code saveAndFlush} forces the
+     * INSERT (and the primary-key uniqueness check) to happen now, so a concurrent duplicate
+     * surfaces immediately as a {@code DataIntegrityViolationException} rather than silently at
+     * commit. The PK constraint — not an app-level check-then-write — is the dedup guarantee.
+     */
     public void register(String idempotencyKey, UUID transactionId, CreateTransactionRequest request) {
-        repository.save(new IdempotencyRecord(
+        repository.saveAndFlush(new IdempotencyRecord(
                 idempotencyKey, transactionId, hash(request), Instant.now()));
     }
 

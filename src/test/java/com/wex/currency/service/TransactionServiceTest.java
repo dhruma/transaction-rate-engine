@@ -3,6 +3,7 @@ package com.wex.currency.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -63,6 +64,23 @@ class TransactionServiceTest {
         PurchaseTransaction result = service().store(request, "key-1");
 
         assertThat(result.getId()).isEqualTo(existingId);
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void losingTheIdempotencyKeyRaceCreatesNoTransaction() {
+        var request = new CreateTransactionRequest(
+                "Race", LocalDate.of(2024, 3, 1), new BigDecimal("5.00"));
+        when(idempotencyService.findExistingTransaction("dup", request))
+                .thenReturn(Optional.empty());
+        // A concurrent request already claimed the key: the PK insert loses the race.
+        org.mockito.Mockito.doThrow(
+                        new org.springframework.dao.DataIntegrityViolationException("dup pk"))
+                .when(idempotencyService).register(eq("dup"), any(), eq(request));
+
+        assertThatThrownBy(() -> service().store(request, "dup"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        // Key claimed before the transaction is created -> no duplicate row persisted.
         verify(transactionRepository, never()).save(any());
     }
 

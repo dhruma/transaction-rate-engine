@@ -37,7 +37,8 @@ class IdempotencyServiceTest {
         // Stateful in-memory stand-in so register() + findExistingTransaction() interact
         // through the real hashing logic rather than pre-baked hashes.
         Map<String, IdempotencyRecord> store = new HashMap<>();
-        lenient().when(repository.save(any())).thenAnswer(i -> {
+        // register() persists via saveAndFlush (PK-enforced claim).
+        lenient().when(repository.saveAndFlush(any())).thenAnswer(i -> {
             IdempotencyRecord r = i.getArgument(0);
             store.put(r.getIdempotencyKey(), r);
             return r;

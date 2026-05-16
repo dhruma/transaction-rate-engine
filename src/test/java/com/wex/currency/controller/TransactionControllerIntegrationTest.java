@@ -196,7 +196,7 @@ class TransactionControllerIntegrationTest {
     }
 
     @Test
-    void listsDistinctCurrencies() throws Exception {
+    void listsCurrenciesUsdFirstThenIsoLabelled() throws Exception {
         wireMock.stubFor(WireMock.get(WireMock.urlPathEqualTo("/rates"))
                 .willReturn(WireMock.aResponse().withStatus(200)
                         .withHeader("Content-Type", "application/json")
@@ -209,9 +209,28 @@ class TransactionControllerIntegrationTest {
 
         mockMvc.perform(get("/api/currencies"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                .andExpect(jsonPath("$[0]").value("Canada-Dollar"))
-                .andExpect(jsonPath("$[1]").value("Euro Zone-Euro"));
+                // USD passthrough option is always first.
+                .andExpect(jsonPath("$[0].value").value("USD"))
+                .andExpect(jsonPath("$[0].label").value("United States-Dollar (USD)"))
+                // Treasury entries are ISO-labelled (CAD known; '-Euro' rule -> EUR).
+                .andExpect(jsonPath("$[1].value").value("Canada-Dollar"))
+                .andExpect(jsonPath("$[1].label").value("Canada-Dollar (CAD)"))
+                .andExpect(jsonPath("$[2].label").value("Euro Zone-Euro (EUR)"));
+    }
+
+    @Test
+    void convertsUsdToUsdWithoutCallingTreasury() throws Exception {
+        String id = storeTransaction("Domestic", "2024-03-15", "100.005");
+        // No WireMock stub on purpose: USD must not hit the Treasury API.
+
+        mockMvc.perform(get("/api/transactions/" + id).param("currency", "USD"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.targetCurrency").value("USD"))
+                .andExpect(jsonPath("$.isoCode").value("USD"))
+                .andExpect(jsonPath("$.exchangeRate").value(1.00))
+                // 100.005 stored -> 100.01 (HALF_UP); USD passthrough keeps it unchanged.
+                .andExpect(jsonPath("$.originalAmountUsd").value(100.01))
+                .andExpect(jsonPath("$.convertedAmount").value(100.01));
     }
 
     @Test
@@ -225,6 +244,16 @@ class TransactionControllerIntegrationTest {
     @Test
     void returns400WhenCurrencyParamMissing() throws Exception {
         mockMvc.perform(get("/api/transactions/" + java.util.UUID.randomUUID()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_PARAMETER"));
+    }
+
+    @Test
+    void returns400ForMalformedCurrencyAndDoesNotCallTreasury() throws Exception {
+        String id = storeTransaction("Inject", "2024-03-15", "10.00");
+        // No WireMock stub: a separator-bearing currency must be rejected before any call.
+        mockMvc.perform(get("/api/transactions/" + id)
+                        .param("currency", "Canada-Dollar,record_date:gte:2030-01-01"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_PARAMETER"));
     }

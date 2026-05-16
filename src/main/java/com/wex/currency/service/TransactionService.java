@@ -62,23 +62,35 @@ public class TransactionService {
         // "rounded to the nearest cent": scale 2, HALF_UP. Done once, on the way in, so the
         // stored amount is the canonical value used for every later conversion.
         BigDecimal amount = request.purchaseAmount().setScale(2, RoundingMode.HALF_UP);
+        UUID id = UUID.randomUUID();
+
+        // Claim the idempotency key BEFORE creating the transaction. The key's primary-key
+        // constraint is the integrity guard: if a concurrent request already claimed it, the
+        // insert fails (DataIntegrityViolationException → 409) and no duplicate transaction is
+        // created, because we haven't created it yet. This is insert-or-return, not
+        // check-then-write — correct without app-level locking.
+        if (idempotent) {
+            idempotencyService.register(idempotencyKey, id, request);
+        }
 
         PurchaseTransaction tx = new PurchaseTransaction(
-                UUID.randomUUID(),
+                id,
                 request.description(),
                 request.transactionDate(),
                 amount,
                 Instant.now());
-        tx = transactionRepository.save(tx);
-
-        if (idempotent) {
-            idempotencyService.register(idempotencyKey, tx.getId(), request);
-        }
-        return tx;
+        return transactionRepository.save(tx);
     }
 
-    /** Retrieves a stored transaction converted to {@code currency} (Requirement #2). */
-    @Transactional(readOnly = true)
+    /**
+     * Retrieves a stored transaction converted to {@code currency} (Requirement #2).
+     *
+     * <p>Deliberately NOT {@code @Transactional}: the load is a single short repository call
+     * (transactional on its own), and the entity has no lazy associations, so the outbound
+     * Treasury HTTP call in {@code convert(...)} runs <em>outside</em> any DB transaction.
+     * Holding a pooled connection for the duration of an external API call would tie pool
+     * lifetime to Treasury latency and risk pool exhaustion under load.
+     */
     public ConvertedTransactionResponse retrieveConverted(UUID id, String currency) {
         PurchaseTransaction tx = transactionRepository.findById(id)
                 .orElseThrow(() -> new TransactionNotFoundException(id));

@@ -10,13 +10,25 @@ function show(el, text, isError) {
   el.classList.toggle("error", !!isError);
 }
 
+// Build the table with DOM nodes + textContent (never innerHTML) so user-supplied
+// values such as `description` cannot inject HTML/script (stored-XSS safe).
 function showTable(el, rows) {
   el.classList.remove("error");
   el.classList.add("show");
-  el.innerHTML =
-    "<table>" +
-    rows.map((r) => `<tr><td>${r[0]}</td><td><strong>${r[1]}</strong></td></tr>`).join("") +
-    "</table>";
+  el.replaceChildren();
+  const table = document.createElement("table");
+  for (const [k, v] of rows) {
+    const tr = document.createElement("tr");
+    const tdK = document.createElement("td");
+    tdK.textContent = k;
+    const tdV = document.createElement("td");
+    const strong = document.createElement("strong");
+    strong.textContent = v == null ? "" : String(v);
+    tdV.appendChild(strong);
+    tr.append(tdK, tdV);
+    table.appendChild(tr);
+  }
+  el.appendChild(table);
 }
 
 async function parseError(res) {
@@ -57,20 +69,6 @@ function renderTxPage() {
     `${start + pageRows.length} of <strong>${total}</strong> stored, newest first. ` +
     `All transactions are persisted.</div>`;
 
-  const table =
-    '<table class="tx-table"><thead><tr>' +
-    "<th>Id</th><th>Description</th><th>Date</th><th>Amount (USD)</th>" +
-    "</tr></thead><tbody>" +
-    pageRows
-      .map(
-        (t) =>
-          `<tr data-id="${t.id}"><td class="tx-id">${t.id}</td>` +
-          `<td>${t.description}</td><td>${t.transactionDate}</td>` +
-          `<td>${t.purchaseAmount}</td></tr>`
-      )
-      .join("") +
-    "</tbody></table>";
-
   const nav =
     '<div class="btn-row" style="margin-top:12px">' +
     `<button type="button" class="secondary" id="prevPage"` +
@@ -80,10 +78,32 @@ function renderTxPage() {
     `${txState.page >= pageCount - 1 ? " disabled" : ""}>Next &#9654;</button>` +
     "</div>";
 
-  wrap.innerHTML = countLine + table + nav;
-  wrap.querySelectorAll("tbody tr").forEach((tr) =>
-    tr.addEventListener("click", () => selectTransaction(tr.dataset.id, tr))
-  );
+  // Static scaffold only (no user data); rows are built via DOM below.
+  wrap.innerHTML =
+    countLine +
+    '<table class="tx-table"><thead><tr>' +
+    "<th>Id</th><th>Description</th><th>Date</th><th>Amount (USD)</th>" +
+    '</tr></thead><tbody id="txBody"></tbody></table>' +
+    nav;
+
+  const tbody = $("txBody");
+  for (const t of pageRows) {
+    const tr = document.createElement("tr");
+    const cells = [
+      [t.id, "tx-id"],
+      [t.description, ""],
+      [t.transactionDate, ""],
+      [t.purchaseAmount, ""],
+    ];
+    for (const [val, cls] of cells) {
+      const td = document.createElement("td");
+      if (cls) td.className = cls;
+      td.textContent = val == null ? "" : String(val);
+      tr.appendChild(td);
+    }
+    tr.addEventListener("click", () => selectTransaction(t.id, tr));
+    tbody.appendChild(tr);
+  }
   const prev = $("prevPage");
   const next = $("nextPage");
   if (prev) prev.addEventListener("click", () => { txState.page--; renderTxPage(); });
@@ -105,12 +125,24 @@ async function loadTransactions() {
   }
 }
 
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 $("storeBtn").addEventListener("click", async () => {
   const out = $("storeResult");
+  const description = $("description").value.trim();
+  const transactionDate = $("date").value;
+  const amount = $("amount").value;
+  // All fields are required — fail fast in the UI before hitting the API.
+  if (!description || !transactionDate || amount === "") {
+    show(out, "Description, transaction date, and amount are all required.", true);
+    return;
+  }
   const payload = {
-    description: $("description").value,
-    transactionDate: $("date").value,
-    purchaseAmount: $("amount").value,
+    description,
+    transactionDate,
+    purchaseAmount: amount,
   };
   try {
     const res = await fetch("/api/transactions", {
@@ -137,7 +169,9 @@ $("storeBtn").addEventListener("click", async () => {
 });
 
 $("clearBtn").addEventListener("click", () => {
-  ["description", "date", "amount"].forEach((id) => ($(id).value = ""));
+  $("description").value = "";
+  $("amount").value = "";
+  $("date").value = today(); // keep the date prefilled to today
   const out = $("storeResult");
   out.classList.remove("show", "error");
   out.textContent = "";
@@ -169,6 +203,7 @@ $("retrieveBtn").addEventListener("click", async () => {
       ["Transaction date", c.transactionDate],
       ["Original (USD)", c.originalAmountUsd],
       ["Target currency", c.targetCurrency],
+      ...(c.isoCode ? [["ISO code", c.isoCode]] : []),
       ["Exchange rate", c.exchangeRate],
       ["Rate date", c.exchangeRateDate],
       ["Converted amount", c.convertedAmount],
@@ -178,18 +213,24 @@ $("retrieveBtn").addEventListener("click", async () => {
   }
 });
 
-// Populate the currency dropdown from the live Treasury currency list.
+// Populate the currency dropdown: USD first, then Treasury currencies labelled with their
+// ISO code when known. Each option's value is what the convert endpoint expects.
 (async () => {
   const sel = $("currency");
   try {
     const res = await fetch("/api/currencies");
     const list = res.ok ? await res.json() : [];
     sel.innerHTML = list.length
-      ? list.map((c) => `<option value="${c}">${c}</option>`).join("")
+      ? list
+          .map((c) => `<option value="${c.value}">${c.label}</option>`)
+          .join("")
       : '<option value="">No currencies available</option>';
   } catch {
     sel.innerHTML = '<option value="">Could not load currencies</option>';
   }
 })();
+
+// Prefill the transaction date with today's date.
+$("date").value = today();
 
 loadTransactions();
