@@ -49,6 +49,23 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "BAD_PARAMETER", ex.getMessage(), List.of());
     }
 
+    @ExceptionHandler(InvalidCurrencyException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCurrency(InvalidCurrencyException ex) {
+        return build(HttpStatus.BAD_REQUEST, "BAD_PARAMETER", ex.getMessage(), List.of());
+    }
+
+    /**
+     * A concurrent request already claimed this {@code Idempotency-Key} (its primary-key
+     * insert lost the race). Deterministic 409 — no duplicate transaction was created — rather
+     * than a generic 500. The client should treat it as "already accepted" and may re-GET.
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateRequest(
+            org.springframework.dao.DataIntegrityViolationException ex) {
+        return build(HttpStatus.CONFLICT, "DUPLICATE_REQUEST",
+                "This request was already accepted for the given Idempotency-Key", List.of());
+    }
+
     @ExceptionHandler(TransactionNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(TransactionNotFoundException ex) {
         return build(HttpStatus.NOT_FOUND, "NOT_FOUND", ex.getMessage(), List.of());

@@ -5,6 +5,7 @@ import com.wex.currency.client.TreasuryRatesClient;
 import com.wex.currency.domain.PurchaseTransaction;
 import com.wex.currency.dto.ConvertedTransactionResponse;
 import com.wex.currency.exception.CurrencyConversionException;
+import com.wex.currency.exception.InvalidCurrencyException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -34,8 +35,28 @@ public class CurrencyConversionService {
      * @throws CurrencyConversionException if no rate exists on or before the purchase date
      *         within the prior 6 months (HTTP 422)
      */
+    /** Max sensible length of a Treasury {@code country_currency_desc}. */
+    private static final int MAX_CURRENCY_LENGTH = 60;
+
     public ConvertedTransactionResponse convert(PurchaseTransaction tx, String currency) {
+        validateCurrency(currency);
         LocalDate purchaseDate = tx.getTransactionDate();
+        BigDecimal amountUsd = tx.getPurchaseAmountUsd();
+
+        // USD -> USD: the Treasury dataset has no USD record (every rate is relative to USD),
+        // so short-circuit with a 1.00 rate and no outbound call rather than 422.
+        if (CurrencyCatalog.isUsd(currency)) {
+            return new ConvertedTransactionResponse(
+                    tx.getId(),
+                    tx.getDescription(),
+                    purchaseDate,
+                    amountUsd,
+                    CurrencyCatalog.USD,
+                    CurrencyCatalog.USD,
+                    BigDecimal.ONE.setScale(2, RoundingMode.HALF_UP),
+                    purchaseDate,
+                    amountUsd.setScale(2, RoundingMode.HALF_UP));
+        }
 
         Optional<TreasuryRate> maybeRate =
                 treasuryRatesClient.findLatestRateOnOrBefore(currency, purchaseDate);
@@ -50,7 +71,7 @@ public class CurrencyConversionService {
         }
 
         // Multiply at full rate precision, then round the final money value to the cent.
-        BigDecimal converted = tx.getPurchaseAmountUsd()
+        BigDecimal converted = amountUsd
                 .multiply(rate.exchangeRate())
                 .setScale(2, RoundingMode.HALF_UP);
 
@@ -58,11 +79,32 @@ public class CurrencyConversionService {
                 tx.getId(),
                 tx.getDescription(),
                 tx.getTransactionDate(),
-                tx.getPurchaseAmountUsd(),
+                amountUsd,
                 currency,
+                CurrencyCatalog.isoFor(currency).orElse(null),
                 rate.exchangeRate(),
                 rate.recordDate(),
                 converted);
+    }
+
+    /**
+     * Rejects blank, over-long, or separator-bearing currency values. {@code ,} and {@code :}
+     * are Treasury filter separators; refusing them yields a clear 400 and prevents the value
+     * from corrupting / injecting into the upstream filter expression.
+     */
+    private void validateCurrency(String currency) {
+        if (currency == null || currency.isBlank()) {
+            throw new InvalidCurrencyException("currency must not be blank");
+        }
+        if (currency.length() > MAX_CURRENCY_LENGTH) {
+            throw new InvalidCurrencyException("currency is too long");
+        }
+        if (currency.indexOf(',') >= 0 || currency.indexOf(':') >= 0
+                || currency.chars().anyMatch(Character::isISOControl)) {
+            throw new InvalidCurrencyException(
+                    "currency contains invalid characters; use the exact value from "
+                            + "GET /api/currencies (e.g. 'Canada-Dollar') or 'USD'");
+        }
     }
 
     private CurrencyConversionException conversionUnavailable(String currency) {

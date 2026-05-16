@@ -30,6 +30,7 @@
         .result td { padding: 4px 6px; }
         .result td:first-child { color: #52606d; width: 45%; }
         .hint { font-size: 12px; color: #7b8794; margin-top: 4px; }
+        .req { color: #c0392b; font-weight: 700; }
         a { color: #fff; text-decoration: underline; }
         .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
         button.secondary { background: #e4e7eb; color: #1f2933; }
@@ -55,12 +56,13 @@
 <main>
     <section class="card">
         <h2>1. Store a purchase transaction</h2>
-        <label for="description">Description (max 50 characters)</label>
-        <input id="description" maxlength="50" placeholder="Office supplies"/>
-        <label for="date">Transaction date</label>
-        <input id="date" type="date"/>
-        <label for="amount">Purchase amount (USD)</label>
-        <input id="amount" type="number" min="0" step="0.01" placeholder="123.45"/>
+        <label for="description">Description (max 50 characters) <span class="req">*</span></label>
+        <input id="description" maxlength="50" placeholder="Office supplies" required/>
+        <label for="date">Transaction date <span class="req">*</span></label>
+        <input id="date" type="date" required/>
+        <label for="amount">Purchase amount (USD) <span class="req">*</span></label>
+        <input id="amount" type="number" min="0" step="0.01" placeholder="123.45" required/>
+        <div class="hint">All fields are required.</div>
         <div class="btn-row">
             <button id="storeBtn">Store transaction</button>
             <button id="clearBtn" class="secondary" type="button">New / Clear form</button>

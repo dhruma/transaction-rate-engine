@@ -10,106 +10,14 @@ A self-contained Spring Boot service that:
 Built to be run as if in production: layered design, full automated functional tests, embedded
 database, and no external infrastructure to install.
 
-## Prerequisites
+## Setup & running
 
-The **only** requirement is **JDK 21**. Maven, the database, and the web server are all
-bundled (Maven wrapper + embedded H2 + embedded Tomcat) — nothing else to install. Internet
-access to `api.fiscaldata.treasury.gov` is needed only for *live* currency conversion; the
-test suite stubs it and runs fully offline.
+All build / install / run / test instructions live in **[SETUP.md](SETUP.md)** —
+per-OS JDK 21 setup (macOS Apple Silicon by default, Intel, Windows), `git clone`,
+`./mvnw spring-boot:run`, `./mvnw test`, and connecting the H2 console.
 
-### macOS
-
-```bash
-# 1. Install JDK 21 (Homebrew). Skip if `java -version` already shows 21.
-brew install openjdk@21
-
-# 2. Point this shell at JDK 21 (Homebrew's JDK is keg-only, so this is required).
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)
-
-# 3. (optional) make it permanent for future shells
-echo 'export JAVA_HOME=$(/usr/libexec/java_home -v 21)' >> ~/.zshrc
-
-# 4. Verify — must print 21.x
-java -version
-```
-
-If `/usr/libexec/java_home -v 21` fails, the JDK isn't installed; install it (step 1) or
-use `export JAVA_HOME=/opt/homebrew/opt/openjdk@21` (Apple Silicon) /
-`/usr/local/opt/openjdk@21` (Intel).
-
-### Windows
-
-```powershell
-# 1. Install JDK 21 (winget). Or download Temurin 21 from https://adoptium.net
-winget install --id EclipseAdoptium.Temurin.21.JDK
-
-# 2. Set JAVA_HOME for the current PowerShell session
-$env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory |
-  Where-Object Name -like 'jdk-21*' | Select-Object -First 1).FullName
-
-# 3. (optional) make it permanent for your user
-setx JAVA_HOME "$env:JAVA_HOME"
-
-# 4. Verify — must print 21.x
-java -version
-```
-
-Use `mvnw.cmd` instead of `./mvnw` in all commands below (e.g. `mvnw.cmd test`).
-
-## Get the code
-
-```bash
-git clone https://github.com/dhruma/transaction-rate-engine.git
-cd transaction-rate-engine
-```
-
-## Run it
-
-```bash
-./mvnw spring-boot:run
-```
-
-Then open:
-
-| URL | What |
-|---|---|
-| http://localhost:8080/ | UI — store a purchase, retrieve it converted |
-| http://localhost:8080/swagger-ui.html | Interactive API documentation |
-| http://localhost:8080/h2-console | Database console — see connection settings below |
-
-### Connecting the H2 console
-
-The login page defaults to `jdbc:h2:~/test`, which is **not** this app's database. Replace
-the fields with:
-
-| Field | Value |
-|---|---|
-| Driver Class | `org.h2.Driver` |
-| JDBC URL | `jdbc:h2:file:./data/wex;AUTO_SERVER=TRUE` |
-| User Name | `sa` |
-| Password | *(leave blank)* |
-
-Notes:
-
-- The `data/` directory is created the first time the app starts, so start the app before
-  connecting. Store a transaction first or the tables will be empty.
-- `;AUTO_SERVER=TRUE` is required so the console can attach while the app holds the file;
-  without it you get a "database may be already in use" lock error.
-- The path is relative to the directory the app was started from. If the console reports the
-  database is not found, use the absolute path instead, e.g.
-  `jdbc:h2:file:/absolute/path/to/transaction-rate-engine/data/wex;AUTO_SERVER=TRUE`.
-- Running a query: clicking a table name in the left tree **appends** that name into the SQL
-  editor (built-in H2 behaviour, not configurable). Click **Clear** (or select-all and
-  delete) before composing the next query, then type e.g.
-  `SELECT * FROM PURCHASE_TRANSACTION;` and click **Run**.
-- `IDEMPOTENCY_RECORD` only has rows when a `POST /api/transactions` was sent with an
-  `Idempotency-Key` header (via curl or Swagger — not surfaced in the UI).
-
-Run the tests:
-
-```bash
-./mvnw test
-```
+The rest of this document is **reference** — what the service does and how it works. It is
+not needed to set up or run the app.
 
 ## API
 
@@ -141,9 +49,16 @@ curl 'http://localhost:8080/api/transactions/<id>?currency=Canada-Dollar'
 
 ```json
 { "id": "f1c2...", "description": "Conference ticket", "transactionDate": "2024-03-15",
-  "originalAmountUsd": 250.00, "targetCurrency": "Canada-Dollar",
+  "originalAmountUsd": 250.00, "targetCurrency": "Canada-Dollar", "isoCode": "CAD",
   "exchangeRate": 1.357, "exchangeRateDate": "2024-03-31", "convertedAmount": 339.25 }
 ```
+
+`isoCode` is the ISO 4217 code when known (best-effort — the Treasury dataset has no ISO
+codes; see *List currencies*). It is `null` for currencies not in the catalog.
+
+**USD → USD:** the Treasury dataset has no USD record (every rate is quoted against USD),
+so `?currency=USD` is a special case: it returns `exchangeRate: 1.00`, `convertedAmount`
+equal to the original amount, `isoCode: "USD"`, and makes **no** outbound Treasury call.
 
 ### List stored transactions — `GET /api/transactions`
 
@@ -157,36 +72,63 @@ persisted; fetch more with a larger `?limit=`.
 
 ### List currencies — `GET /api/currencies`
 
-Distinct currency identifiers from the Treasury API; used by the UI dropdown.
+Selectable target currencies for the UI dropdown. Returns
+`[{ "value": "...", "label": "..." }]` where `value` is what you pass to the convert
+endpoint and `label` includes the ISO 4217 code when known:
 
-## Running the packaged jar (optional)
-
-Reviewing this project does not require deploying it anywhere — `./mvnw spring-boot:run`
-above is all that is needed to exercise every requirement. This section is only here to
-show that the build produces a single self-contained, deployable artifact (the form in
-which a Spring Boot service actually ships):
-
-```bash
-./mvnw clean package
-java -jar target/wex-purchase-currency-service-1.0.0.jar
+```json
+[ { "value": "USD", "label": "United States-Dollar (USD)" },
+  { "value": "Canada-Dollar", "label": "Canada-Dollar (CAD)" },
+  { "value": "Afghanistan-Afghani", "label": "Afghanistan-Afghani" } ]
 ```
 
-This runs the exact same application (embedded web server, embedded H2, UI, API) with only
-a JDK on the machine — no Maven, no separate server. It is an alternative to
-`spring-boot:run`, not an extra step a reviewer needs to perform.
+USD is always first (the no-conversion passthrough). ISO codes are a curated, best-effort
+map over the common currencies plus a rule mapping every `*-Euro` variant to `EUR` — the
+Treasury Reporting Rates of Exchange dataset does not publish ISO codes, so currencies
+outside the catalog show the Treasury name with no code (an accepted limitation).
 
 ## Idempotency
 
-`POST /api/transactions` accepts an optional `Idempotency-Key` header.
+`POST /api/transactions` accepts an optional `Idempotency-Key` header. Behaviour by case:
 
-- Same key + identical body → the **original** transaction is returned (no duplicate created).
-- Same key + different body → `422 IDEMPOTENCY_CONFLICT` (returning the original would
-  misrepresent the new request and hide a client bug).
+| Requests | Result |
+|---|---|
+| Key sent on **only one** request (or different keys) | Each is an independent create — `201`, new id. Idempotency is not engaged; this is **not** a conflict. |
+| **Same key + same body** (sent on *both* requests) | `201` with the **same id** as the first — a replay, no duplicate row. |
+| **Same key + different body** | `422 IDEMPOTENCY_CONFLICT` — reusing a key with changed data is rejected rather than silently returning the wrong record. |
+| **Same key, two concurrent requests** | One wins; the other gets `409 DUPLICATE_REQUEST`. No duplicate is ever persisted. |
 
-Idempotency is an API-level concern and is exercised via the `Idempotency-Key` request
-header (curl or Swagger UI). It is deliberately not surfaced in the web UI — most users
-have no reason to set a key by hand, and an extra field there caused more confusion than it
-was worth. The behaviour is fully covered by automated tests.
+> **Gotcha:** the key must be sent on **every** request you want treated as idempotent. In
+> Swagger UI the `Idempotency-Key` box is per-call and does **not** carry over between
+> "Execute" clicks — a blank key on the second call creates a new transaction (a new id),
+> which is correct behaviour, not a bug. Verify by comparing the `id` in the two responses:
+> same id ⇒ replay; new id ⇒ the key wasn't sent.
+
+Body equivalence is by **value, not text**: `purchaseAmount` `205`, `205.0`, and `205.00`
+are the same purchase and hash identically (so they replay, they don't conflict).
+
+```bash
+KEY=$(uuidgen)
+# 1st — creates
+curl -s -X POST http://localhost:8080/api/transactions \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
+  -d '{"description":"demo","transactionDate":"2026-05-16","purchaseAmount":205}'
+# 2nd — SAME key + SAME body → 201, SAME id (replay)
+curl -s -X POST http://localhost:8080/api/transactions \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
+  -d '{"description":"demo","transactionDate":"2026-05-16","purchaseAmount":205}'
+# 3rd — SAME key + CHANGED body → 422 IDEMPOTENCY_CONFLICT
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/api/transactions \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
+  -d '{"description":"demo-CHANGED","transactionDate":"2026-05-16","purchaseAmount":999}'
+```
+
+**Implementation:** the key is **claimed before the transaction is created**, and uniqueness
+is enforced by the `idempotency_key` **primary-key constraint** (insert-or-return), not an
+app-level check-then-write — so a concurrent duplicate cannot create a second row. Sequential
+replay, body-mismatch conflict, and the lost-race-creates-nothing path are covered by
+automated tests. Idempotency is an API-level concern and is deliberately not surfaced in the
+web UI — most users have no reason to set a key by hand.
 
 ## Error model
 
@@ -196,7 +138,9 @@ separate two distinct failure families:
 | Status | When |
 |---|---|
 | `400` | Invalid input (description > 50, non-positive amount, bad date, malformed JSON) |
+| `400 BAD_PARAMETER` | Missing / non-UUID id, or a `currency` that is blank, over-long, or contains a Treasury filter separator (`,` `:`) |
 | `404` | Transaction id not found |
+| `409 DUPLICATE_REQUEST` | Same `Idempotency-Key` claimed concurrently — the losing request; no transaction was created |
 | `422 CONVERSION_UNAVAILABLE` | No exchange rate on/before the purchase date within 6 months — an **expected business outcome** |
 | `422 IDEMPOTENCY_CONFLICT` | `Idempotency-Key` reused with a different body |
 | `503 TREASURY_UNAVAILABLE` | Treasury API unreachable / timed out / 5xx — an **infrastructure fault** |
@@ -239,16 +183,45 @@ vault rather than configuration, and per-client rate limiting.
 
 ## Testing
 
-`./mvnw test` runs 20 functional tests (no network required — the Treasury API is stubbed
+`./mvnw test` runs 43 functional tests (no network required — the Treasury API is stubbed
 with WireMock):
 
 - **Unit**: conversion + rounding, the inclusive 6-month boundary (exact / one-day-older /
-  no-rate), idempotency replay vs. conflict, store-amount rounding.
+  no-rate), idempotency replay vs. conflict, store-amount rounding, the currency ISO
+  catalog, and the Treasury client (JSON mapping, currency de-dup/sort, timeout /
+  connection-refused / 4xx / 5xx → 503).
 - **Integration** (full Spring context + in-memory H2 + WireMock): store + validation
-  failures, successful conversion, `422` no-rate, `404` unknown id, `503` Treasury down, and
-  idempotent replay / conflict end-to-end.
+  failures, successful conversion, USD→USD passthrough, idempotent replay / conflict,
+  list + pagination, and every error status — `400` (bad input / missing or non-UUID
+  param), `404` (unknown id / unknown path), `422` (no rate / idempotency conflict),
+  `503` (Treasury unavailable).
 
 Non-functional testing (performance/load) is intentionally out of scope per the brief.
+
+## Concurrency & known limitations
+
+Concurrency engineering was out of scope per the brief, so the code does not add locking or
+threading machinery. Two data-integrity correctness fixes were made, however, because they
+rely only on the database and are correct regardless of thread count — they are *not*
+concurrency features:
+
+- **Idempotency is integrity-safe via the primary key.** `store()` claims the key
+  (`saveAndFlush` of `IdempotencyRecord`) **before** creating the transaction; the
+  `idempotency_key` PK constraint is the dedup guarantee. A concurrent duplicate's insert
+  fails fast → `409 DUPLICATE_REQUEST`, and because the key is claimed first the losing
+  request never creates a transaction. This is insert-or-return, not check-then-write —
+  no duplicate can be persisted. (Sequential replay still takes a fast pre-check path.)
+- **No DB connection is held across the Treasury call.** `retrieveConverted` is not
+  `@Transactional`; the entity is loaded by a single short repository call and the outbound
+  HTTP call runs outside any transaction, so pool lifetime is not tied to Treasury latency.
+- **Append-only data model.** `PurchaseTransaction` is never updated, so there are no
+  update races and no need for optimistic locking (`@Version`).
+- **Embedded H2** allows multiple connections (`AUTO_SERVER=TRUE`) but is not built for
+  high write concurrency — see *Production hardening* for the Postgres path.
+- **Live Treasury call per retrieve** does not scale under load (thundering herd / rate
+  limits); the batch-ingestion design below removes it from the request path.
+- On Java 21, `spring.threads.virtual.enabled=true` would cheaply scale the blocking,
+  I/O-bound request model — a one-line change deferred with the rest of concurrency.
 
 ## Production hardening (what would change to ship this at scale)
 
@@ -270,11 +243,12 @@ src/main/java/com/wex/currency/
   repository/  Spring Data repositories
   dto/         request/response records + error body
   client/      TreasuryRatesClient (RestClient, timeouts) + TreasuryRate
-  service/     TransactionService, CurrencyConversionService, IdempotencyService
+  service/     TransactionService, CurrencyConversionService, IdempotencyService, CurrencyCatalog
   controller/  REST API + UI page controller
   exception/   typed exceptions + global handler
   config/      API-key filter, OpenAPI metadata
 src/main/resources/  application.yml, templates/index.html, static/app.js
 src/test/java/...    unit + integration tests
+SETUP.md             build / run / test instructions
 docs/PLAN.md         the design/approach document
 ```

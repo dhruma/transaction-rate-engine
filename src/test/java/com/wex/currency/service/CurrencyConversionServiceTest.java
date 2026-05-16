@@ -2,6 +2,7 @@ package com.wex.currency.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.wex.currency.client.TreasuryRate;
@@ -89,5 +90,37 @@ class CurrencyConversionServiceTest {
 
         assertThatThrownBy(() -> service().convert(tx(new BigDecimal("50.00")), "EUR"))
                 .isInstanceOf(CurrencyConversionException.class);
+    }
+
+    @Test
+    void usdToUsdPassesThroughAtRateOneWithoutCallingTreasury() {
+        ConvertedTransactionResponse r = service().convert(tx(new BigDecimal("100.00")), "usd");
+
+        assertThat(r.targetCurrency()).isEqualTo("USD");
+        assertThat(r.isoCode()).isEqualTo("USD");
+        assertThat(r.exchangeRate()).isEqualByComparingTo("1.00");
+        assertThat(r.convertedAmount()).isEqualByComparingTo("100.00");
+        assertThat(r.exchangeRateDate()).isEqualTo(PURCHASE_DATE);
+        verifyNoInteractions(client);
+    }
+
+    @Test
+    void rejectsCurrencyWithFilterSeparatorWithoutCallingTreasury() {
+        assertThatThrownBy(() -> service().convert(
+                tx(new BigDecimal("10.00")), "Canada-Dollar,record_date:gte:2030-01-01"))
+                .isInstanceOf(com.wex.currency.exception.InvalidCurrencyException.class);
+        assertThatThrownBy(() -> service().convert(tx(new BigDecimal("10.00")), "  "))
+                .isInstanceOf(com.wex.currency.exception.InvalidCurrencyException.class);
+        verifyNoInteractions(client);
+    }
+
+    @Test
+    void populatesIsoCodeForKnownCurrency() {
+        when(client.findLatestRateOnOrBefore("Canada-Dollar", PURCHASE_DATE))
+                .thenReturn(Optional.of(new TreasuryRate(
+                        "Canada-Dollar", new BigDecimal("1.3"), LocalDate.of(2023, 6, 30))));
+
+        assertThat(service().convert(tx(new BigDecimal("10.00")), "Canada-Dollar").isoCode())
+                .isEqualTo("CAD");
     }
 }

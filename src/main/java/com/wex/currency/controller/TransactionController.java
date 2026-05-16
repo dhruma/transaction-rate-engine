@@ -3,12 +3,16 @@ package com.wex.currency.controller;
 import com.wex.currency.client.TreasuryRatesClient;
 import com.wex.currency.dto.ConvertedTransactionResponse;
 import com.wex.currency.dto.CreateTransactionRequest;
+import com.wex.currency.dto.CurrencyOption;
 import com.wex.currency.dto.TransactionResponse;
+import com.wex.currency.service.CurrencyCatalog;
 import com.wex.currency.service.TransactionService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -71,14 +75,27 @@ public class TransactionController {
     @Operation(summary = "Retrieve a stored transaction converted to a target currency")
     public ConvertedTransactionResponse retrieve(
             @PathVariable UUID id,
+            @Parameter(description = "Target currency in Treasury format only — the exact "
+                    + "`country_currency_desc` value from GET /api/currencies (e.g. "
+                    + "`Canada-Dollar`, `Euro Zone-Euro`). The literal `USD` is also accepted "
+                    + "for the no-conversion passthrough. ISO codes (e.g. `CAD`) are NOT "
+                    + "accepted.", example = "Canada-Dollar", required = true)
             @RequestParam("currency") String currency) {
         return transactionService.retrieveConverted(id, currency);
     }
 
-    /** Distinct Treasury currency identifiers — powers the UI dropdown. */
+    /**
+     * Selectable target currencies for the UI dropdown: USD first (no-conversion
+     * passthrough), then the Treasury currencies labelled with their ISO 4217 code when known.
+     */
     @GetMapping("/currencies")
-    @Operation(summary = "List currencies supported by the Treasury API")
-    public List<String> currencies() {
-        return treasuryRatesClient.listCurrencies();
+    @Operation(summary = "List selectable target currencies (USD + Treasury, ISO-labelled)")
+    public List<CurrencyOption> currencies() {
+        List<CurrencyOption> options = new ArrayList<>();
+        options.add(new CurrencyOption(CurrencyCatalog.USD, "United States-Dollar (USD)"));
+        treasuryRatesClient.listCurrencies().stream()
+                .map(desc -> new CurrencyOption(desc, CurrencyCatalog.label(desc)))
+                .forEach(options::add);
+        return options;
     }
 }
