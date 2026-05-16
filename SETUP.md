@@ -36,7 +36,13 @@ JDK 21 is installed.
 ```powershell
 # 1. Install JDK 21 (winget). Or download Temurin 21 from https://adoptium.net
 winget install --id EclipseAdoptium.Temurin.21.JDK
+```
 
+**After installing, open a NEW PowerShell window** before continuing — `winget` does not
+refresh the current session's environment, so `java` will be "not recognized" until you
+start a fresh terminal. Then, in the new window:
+
+```powershell
 # 2. Set JAVA_HOME for the current PowerShell session
 $env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory |
   Where-Object Name -like 'jdk-21*' | Select-Object -First 1).FullName
