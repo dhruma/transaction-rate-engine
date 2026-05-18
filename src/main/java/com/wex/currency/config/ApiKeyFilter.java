@@ -7,6 +7,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -48,7 +50,7 @@ public class ApiKeyFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         String provided = request.getHeader(headerName);
-        if (expectedKey.equals(provided)) {
+        if (matches(provided)) {
             chain.doFilter(request, response);
             return;
         }
@@ -57,5 +59,19 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         objectMapper.writeValue(response.getWriter(), ErrorResponse.of(
                 HttpStatus.UNAUTHORIZED.value(), "UNAUTHORIZED",
                 "Missing or invalid API key"));
+    }
+
+    /**
+     * Constant-time key comparison. {@link MessageDigest#isEqual} does not short-circuit on
+     * the first differing byte, so response time does not leak how much of the key matched —
+     * a plain {@code String.equals} here would be a timing-oracle on the secret.
+     */
+    private boolean matches(String provided) {
+        if (provided == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                expectedKey.getBytes(StandardCharsets.UTF_8),
+                provided.getBytes(StandardCharsets.UTF_8));
     }
 }
