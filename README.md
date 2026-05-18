@@ -183,18 +183,20 @@ vault rather than configuration, and per-client rate limiting.
 
 ## Testing
 
-`./mvnw test` runs 43 functional tests (no network required — the Treasury API is stubbed
+`./mvnw test` runs 50 functional tests (no network required — the Treasury API is stubbed
 with WireMock):
 
 - **Unit**: conversion + rounding, the inclusive 6-month boundary (exact / one-day-older /
-  no-rate), idempotency replay vs. conflict, store-amount rounding, the currency ISO
-  catalog, and the Treasury client (JSON mapping, currency de-dup/sort, timeout /
-  connection-refused / 4xx / 5xx → 503).
+  no-rate / **month-end clamp**, e.g. Aug 31 → Feb 28), a rate dated **after** the
+  purchase date, an unusable (missing / non-positive) rate, idempotency replay vs.
+  conflict, store-amount rounding, the currency ISO catalog, and the Treasury client
+  (JSON mapping, currency de-dup/sort, timeout / connection-refused / 4xx / 5xx → 503).
 - **Integration** (full Spring context + in-memory H2 + WireMock): store + validation
   failures, successful conversion, USD→USD passthrough, idempotent replay / conflict,
-  list + pagination, and every error status — `400` (bad input / missing or non-UUID
-  param), `404` (unknown id / unknown path), `422` (no rate / idempotency conflict),
-  `503` (Treasury unavailable).
+  **two concurrent same-key POSTs persisting exactly one row** (real port, real
+  threads), list + pagination, and every error status — `400` (bad input / missing or
+  non-UUID param), `404` (unknown id / unknown path), `422` (no rate / idempotency
+  conflict), `503` (Treasury unavailable).
 
 Non-functional testing (performance/load) is intentionally out of scope per the brief.
 
@@ -211,6 +213,9 @@ concurrency features:
   fails fast → `409 DUPLICATE_REQUEST`, and because the key is claimed first the losing
   request never creates a transaction. This is insert-or-return, not check-then-write —
   no duplicate can be persisted. (Sequential replay still takes a fast pre-check path.)
+  This is **verified, not just argued**: `IdempotencyConcurrencyIntegrationTest` fires
+  two simultaneous same-key POSTs at a real running server and asserts exactly one row
+  is persisted with no 5xx.
 - **No DB connection is held across the Treasury call.** `retrieveConverted` is not
   `@Transactional`; the entity is loaded by a single short repository call and the outbound
   HTTP call runs outside any transaction, so pool lifetime is not tied to Treasury latency.
