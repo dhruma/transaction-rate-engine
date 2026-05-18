@@ -217,16 +217,31 @@ $("retrieveBtn").addEventListener("click", async () => {
 // ISO code when known. Each option's value is what the convert endpoint expects.
 (async () => {
   const sel = $("currency");
+  // Build <option>s via DOM + textContent (never innerHTML), same rule as showTable:
+  // values come from an upstream API and must not be able to inject markup.
+  const placeholder = (text) => {
+    sel.replaceChildren();
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = text;
+    sel.appendChild(opt);
+  };
   try {
     const res = await fetch("/api/currencies");
     const list = res.ok ? await res.json() : [];
-    sel.innerHTML = list.length
-      ? list
-          .map((c) => `<option value="${c.value}">${c.label}</option>`)
-          .join("")
-      : '<option value="">No currencies available</option>';
+    if (!list.length) {
+      placeholder("No currencies available");
+      return;
+    }
+    sel.replaceChildren();
+    for (const c of list) {
+      const opt = document.createElement("option");
+      opt.value = c.value == null ? "" : String(c.value);
+      opt.textContent = c.label == null ? "" : String(c.label);
+      sel.appendChild(opt);
+    }
   } catch {
-    sel.innerHTML = '<option value="">Could not load currencies</option>';
+    placeholder("Could not load currencies");
   }
 })();
 

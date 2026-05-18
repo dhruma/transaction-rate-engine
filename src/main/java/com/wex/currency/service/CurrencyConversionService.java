@@ -25,6 +25,9 @@ public class CurrencyConversionService {
     /** The brief's window: a usable rate must not be older than this many months. */
     private static final int MAX_RATE_AGE_MONTHS = 6;
 
+    /** Max sensible length of a Treasury {@code country_currency_desc}. */
+    private static final int MAX_CURRENCY_LENGTH = 60;
+
     private final TreasuryRatesClient treasuryRatesClient;
 
     public CurrencyConversionService(TreasuryRatesClient treasuryRatesClient) {
@@ -32,12 +35,14 @@ public class CurrencyConversionService {
     }
 
     /**
-     * @throws CurrencyConversionException if no rate exists on or before the purchase date
-     *         within the prior 6 months (HTTP 422)
+     * Converts the stored purchase into {@code currency} using the newest Treasury rate that is
+     * on or before the purchase date and within the prior 6 months (Requirement #2).
+     *
+     * @throws InvalidCurrencyException    if {@code currency} is blank, over-long, or contains a
+     *                                     Treasury filter separator (HTTP 400)
+     * @throws CurrencyConversionException if no usable rate exists on or before the purchase date
+     *                                     within the prior 6 months (HTTP 422)
      */
-    /** Max sensible length of a Treasury {@code country_currency_desc}. */
-    private static final int MAX_CURRENCY_LENGTH = 60;
-
     public ConvertedTransactionResponse convert(PurchaseTransaction tx, String currency) {
         validateCurrency(currency);
         LocalDate purchaseDate = tx.getTransactionDate();
@@ -62,6 +67,20 @@ public class CurrencyConversionService {
                 treasuryRatesClient.findLatestRateOnOrBefore(currency, purchaseDate);
 
         TreasuryRate rate = maybeRate.orElseThrow(() -> conversionUnavailable(currency));
+
+        // A 200 response can still carry an unusable row (missing/zero rate). Treat it as
+        // "no rate" (422), not an NPE/500 — the dependency answered, it just has no usable
+        // figure for this purchase.
+        if (rate.exchangeRate() == null || rate.exchangeRate().signum() <= 0) {
+            throw conversionUnavailable(currency);
+        }
+
+        // "On or before the purchase date" is enforced upstream by the client's
+        // record_date:lte filter; re-check here so correctness does not depend on a remote
+        // query string and is independently unit-tested.
+        if (rate.recordDate().isAfter(purchaseDate)) {
+            throw conversionUnavailable(currency);
+        }
 
         // Inclusive lower bound: a rate dated exactly six months before the purchase is still
         // acceptable. minusMonths(6) is calendar-aware (handles month-length differences).

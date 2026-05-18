@@ -85,6 +85,56 @@ class CurrencyConversionServiceTest {
     }
 
     @Test
+    void clampsToMonthEndWhenSixMonthsBeforeIsAShorterMonth() {
+        // 2023-08-31 minusMonths(6) clamps to 2023-02-28 (Feb has no 31st). The clamped day
+        // is the inclusive lower bound, so a rate dated 2023-02-28 must be accepted and the
+        // day before it rejected. This is the one genuinely subtle date case in the rule.
+        LocalDate purchase = LocalDate.of(2023, 8, 31);
+        LocalDate clampedBoundary = LocalDate.of(2023, 2, 28);
+        PurchaseTransaction tx =
+                new PurchaseTransaction(UUID.randomUUID(), "Test", purchase,
+                        new BigDecimal("10.00"), Instant.now());
+
+        when(client.findLatestRateOnOrBefore("EUR", purchase))
+                .thenReturn(Optional.of(new TreasuryRate("EUR", new BigDecimal("0.9"), clampedBoundary)));
+        assertThat(service().convert(tx, "EUR").exchangeRateDate()).isEqualTo(clampedBoundary);
+
+        when(client.findLatestRateOnOrBefore("EUR", purchase))
+                .thenReturn(Optional.of(new TreasuryRate(
+                        "EUR", new BigDecimal("0.9"), clampedBoundary.minusDays(1))));
+        assertThatThrownBy(() -> service().convert(tx, "EUR"))
+                .isInstanceOf(CurrencyConversionException.class);
+    }
+
+    @Test
+    void rejectsRateDatedAfterPurchaseDate() {
+        // Defense-in-depth: the client filters record_date:lte upstream, but the service must
+        // not depend on the remote query string for correctness.
+        when(client.findLatestRateOnOrBefore("EUR", PURCHASE_DATE))
+                .thenReturn(Optional.of(new TreasuryRate(
+                        "EUR", new BigDecimal("0.9"), PURCHASE_DATE.plusDays(1))));
+
+        assertThatThrownBy(() -> service().convert(tx(new BigDecimal("50.00")), "EUR"))
+                .isInstanceOf(CurrencyConversionException.class)
+                .hasMessageContaining("cannot be converted");
+    }
+
+    @Test
+    void rejectsRowWithMissingOrNonPositiveExchangeRate() {
+        // A 200 from Treasury can still carry an unusable rate; that is a 422 "no rate",
+        // not an unhandled NPE/500.
+        when(client.findLatestRateOnOrBefore("EUR", PURCHASE_DATE))
+                .thenReturn(Optional.of(new TreasuryRate("EUR", null, PURCHASE_DATE)));
+        assertThatThrownBy(() -> service().convert(tx(new BigDecimal("50.00")), "EUR"))
+                .isInstanceOf(CurrencyConversionException.class);
+
+        when(client.findLatestRateOnOrBefore("EUR", PURCHASE_DATE))
+                .thenReturn(Optional.of(new TreasuryRate("EUR", BigDecimal.ZERO, PURCHASE_DATE)));
+        assertThatThrownBy(() -> service().convert(tx(new BigDecimal("50.00")), "EUR"))
+                .isInstanceOf(CurrencyConversionException.class);
+    }
+
+    @Test
     void rejectsWhenNoRateAvailable() {
         when(client.findLatestRateOnOrBefore("EUR", PURCHASE_DATE)).thenReturn(Optional.empty());
 

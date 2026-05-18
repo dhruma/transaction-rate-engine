@@ -34,18 +34,41 @@ JDK 21 is installed.
 ### Windows
 
 ```powershell
-# 1. Install JDK 21 (winget). Or download Temurin 21 from https://adoptium.net
-winget install --id EclipseAdoptium.Temurin.21.JDK
+# 1. Install JDK 21 (winget). The --override passes MSI feature flags so the installer
+#    itself sets JAVA_HOME and adds the JDK to PATH machine-wide — no manual env setup.
+#    (Or download Temurin 21 from https://adoptium.net and run the MSI with the same
+#    "Set JAVA_HOME" + "Add to PATH" features ticked.)
+winget install --id EclipseAdoptium.Temurin.21.JDK `
+  --override "ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJavaHome /quiet"
+```
 
-# 2. Set JAVA_HOME for the current PowerShell session
-$env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory |
-  Where-Object Name -like 'jdk-21*' | Select-Object -First 1).FullName
+**After installing, open a NEW PowerShell window** before continuing — `winget` does not
+refresh the current session's environment, so `java` will be "not recognized" until you
+start a fresh terminal. In the new window, verify:
 
-# 3. (optional) make it permanent for your user
-setx JAVA_HOME "$env:JAVA_HOME"
-
-# 4. Verify — must print 21.x
+```powershell
+# 2. Verify — must print 21.x. If it does, you are done; skip step 3.
 java -version
+```
+
+If `java -version` still fails (the `--override` flags were not honored, or you used a
+plain installer), this fallback locates the JDK, fixes the current session, and persists
+the change so future windows work too:
+
+```powershell
+# 3. Fallback: find a JDK 21 under either common install root, set JAVA_HOME, prepend
+#    its bin to PATH for THIS session, persist both for future sessions, then verify.
+$jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium', 'C:\Program Files\Java' `
+  -Directory -ErrorAction SilentlyContinue |
+  Where-Object Name -like 'jdk-21*' | Select-Object -First 1
+if (-not $jdk) { throw "JDK 21 not found under C:\Program Files\Eclipse Adoptium or \Java" }
+
+$env:JAVA_HOME = $jdk.FullName                       # current session
+$env:Path      = "$env:JAVA_HOME\bin;$env:Path"      # current session
+setx JAVA_HOME "$env:JAVA_HOME"          | Out-Null  # persist for future sessions
+setx PATH "%JAVA_HOME%\bin;$env:Path"    | Out-Null  # persist for future sessions
+
+java -version                                        # must print 21.x
 ```
 
 Use `mvnw.cmd` instead of `./mvnw` in all commands below (e.g. `mvnw.cmd test`).
@@ -77,7 +100,7 @@ Then open:
 ./mvnw test
 ```
 
-43 functional tests (unit + WireMock-stubbed integration), no network required.
+50 functional tests (unit + WireMock-stubbed integration), no network required.
 
 ## Connecting the H2 console
 
